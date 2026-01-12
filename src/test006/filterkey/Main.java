@@ -1,6 +1,7 @@
 package test006.filterkey;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Font;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
@@ -91,7 +92,7 @@ public class Main extends JFrame {
 
 	private void setKeyMap() {
 		keyMap = new HashMap<>();
-		String[] keyArray = { "1", "!", "2", "@", "3", "4", "$", "5", "%", "6", "^", "7", "8", "*", "9", "0", "q", "Q",
+		String[] keyArray = { "1", "!", "2", "@", "3", "4", "$", "5", "%", "6", "^", "7", "8", "*", "9","(", "0", "q", "Q",
 				"w", "W", "e", "E", "r", "t", "T", "y", "Y", "u", "i", "I", "o", "O", "p", "P", "a", "s", "S", "d", "D",
 				"f", "g", "G", "h", "H", "j", "J", "k", "l", "L", "z", "Z", "x", "c", "C", "v", "V", "b", "B", "n", "m",
 				"M" };
@@ -202,6 +203,8 @@ public class Main extends JFrame {
 		textArea.setFont(new Font("Consolas", Font.PLAIN, 24));
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		setSize(600, 400);
+		textArea.setBackground(Color.black);
+		textArea.setForeground(Color.white);
 		setVisible(true);
 	}
 

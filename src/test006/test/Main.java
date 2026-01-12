@@ -1,4 +1,4 @@
-package test006.filterkey;
+package test006.test;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -15,34 +15,66 @@ import javax.sound.midi.Receiver;
 import javax.sound.midi.ShortMessage;
 import javax.swing.JFrame;
 import javax.swing.JTextArea;
-import javax.swing.text.AbstractDocument;
 
 public class Main extends JFrame {
 	private static final long serialVersionUID = 1L;
 	private JTextArea textArea = null;
 	private Map<String, Integer> keyMap = null;
 	private MidiDevice outDevice = null;
-	private Receiver receiver = null; // 리시버를 전역변수로 관리
+	private Receiver receiver = null;
 	private String targetPortName = "loopMIDI Port";
 	private Map<Integer, Boolean> keyStateMap = new HashMap<>();
+	
 	private boolean isSustainToggled = false;
-	private int octaveOffset = 0; // 옥타브 변동값 (1당 12단계)
-	private int transposeOffset = 0; // 반음 변동값 (왼쪽/오른쪽 방향키)
-	private AbstractDocument doc = null;
-	private boolean sw = false;
+	private int octaveOffset = 0;
+	private int transposeOffset = 0;
+
+	// 자동 페달 관련 변수
+	private Thread autoPedalThread = null;
+	private int pedalInterval = 600; // 4분음표 간격 (ms단위, 600ms = 약 100BPM)
+
 	private void sendSustainCommand(boolean isOn) {
 		try {
 			if (receiver != null) {
 				ShortMessage msg = new ShortMessage();
-				// 127은 On(밟음), 0은 Off(뗌)
 				int value = isOn ? 127 : 0;
-				// 0xB0(Control Change), 64(Sustain Pedal)
 				msg.setMessage(ShortMessage.CONTROL_CHANGE, 0, 64, value);
 				receiver.send(msg, -1);
-				System.out.println("Sustain " + (isOn ? "ON" : "OFF"));
 			}
 		} catch (InvalidMidiDataException e) {
 			e.printStackTrace();
+		}
+	}
+
+	// 서스테인이 켜져있을 때 주기적으로 페달을 갈아주는 스레드
+	private void manageAutoPedal(boolean start) {
+		if (start) {
+			if (autoPedalThread != null && autoPedalThread.isAlive()) return;
+			
+			autoPedalThread = new Thread(() -> {
+				try {
+					while (isSustainToggled) {
+						// 1. 페달 뗌 (잔향 제거)
+						sendSustainCommand(false);
+						Thread.sleep(50); // 아주 잠깐 뗌
+						
+						// 2. 다시 밟음
+						sendSustainCommand(true);
+						
+						// 3. 지정된 시간(4분음표 등)만큼 대기
+						Thread.sleep(pedalInterval);
+					}
+				} catch (InterruptedException e) {
+					// 스레드 종료
+				}
+			});
+			autoPedalThread.setDaemon(true);
+			autoPedalThread.start();
+		} else {
+			if (autoPedalThread != null) {
+				autoPedalThread.interrupt();
+			}
+			sendSustainCommand(false); // 최종적으로 끔
 		}
 	}
 
@@ -54,8 +86,8 @@ public class Main extends JFrame {
 					MidiDevice device = MidiSystem.getMidiDevice(info);
 					if (device.getMaxReceivers() != 0) {
 						outDevice = device;
-						outDevice.open(); // 여기서 딱 한 번만 엽니다.
-						receiver = outDevice.getReceiver(); // 리시버 미리 생성
+						outDevice.open();
+						receiver = outDevice.getReceiver();
 						System.out.println("연결 성공: " + info.getName());
 						break;
 					}
@@ -104,50 +136,34 @@ public class Main extends JFrame {
 
 	private void setTextArea() {
 		textArea = new JTextArea();
-		textArea.setLineWrap(true); // 자동 줄바꿈
-	    textArea.setWrapStyleWord(true);
-		doc = (AbstractDocument) textArea.getDocument();
-		doc.setDocumentFilter(new RepeatFilter());
+		textArea.setLineWrap(true);
+		textArea.setWrapStyleWord(true);
 		textArea.addKeyListener(new KeyAdapter() {
 			@Override
 			public void keyPressed(KeyEvent e) {
 				int keyCode = e.getKeyCode();
-				// 백스페이스 감지 (토글 로직)
-				if (e.getKeyCode() == KeyEvent.VK_BACK_SPACE && e.isShiftDown()) {
-				    isSustainToggled = !isSustainToggled; // 상태 반전
-				    sendSustainCommand(isSustainToggled); // MIDI 전송
-				    return; // 이벤트 소비 (백스페이스 문자 입력 방지)
+
+				// Shift + Backspace: 서스테인 토글 + 자동 페달 시작/중지
+				if (keyCode == KeyEvent.VK_BACK_SPACE && e.isShiftDown()) {
+					isSustainToggled = !isSustainToggled;
+					manageAutoPedal(isSustainToggled);
+					updateStatus();
+					return;
 				}
 
-				// 1. 방향키 제어 로직
+				// 방향키 제어
 				switch (keyCode) {
-				case KeyEvent.VK_UP: // 옥타브 위로
-					octaveOffset += 12;
-					updateStatus();
-					return;
-				case KeyEvent.VK_DOWN: // 옥타브 아래로
-					octaveOffset -= 12;
-					updateStatus();
-					return;
-				case KeyEvent.VK_RIGHT: // 반음 위로 (Transpose)
-					transposeOffset += 1;
-					updateStatus();
-					return;
-				case KeyEvent.VK_LEFT: // 반음 아래로 (Transpose)
-					transposeOffset -= 1;
-					updateStatus();
-					return;
+				case KeyEvent.VK_UP: octaveOffset += 12; updateStatus(); return;
+				case KeyEvent.VK_DOWN: octaveOffset -= 12; updateStatus(); return;
+				case KeyEvent.VK_RIGHT: transposeOffset += 1; updateStatus(); return;
+				case KeyEvent.VK_LEFT: transposeOffset -= 1; updateStatus(); return;
 				}
 
-				// 2. 기존 연주 로직 (변수 적용)
 				String charKey = String.valueOf(e.getKeyChar());
 				Integer baseNote = keyMap.get(charKey);
 
 				if (baseNote != null) {
-					// 기본값(baseNote) + 옥타브 + 조옮김 값을 합산
 					int finalNote = baseNote + octaveOffset + transposeOffset;
-
-					// MIDI 범위(0~127) 체크
 					if (finalNote >= 0 && finalNote <= 127 && !keyStateMap.getOrDefault(finalNote, false)) {
 						keyStateMap.put(finalNote, true);
 						noteON(finalNote);
@@ -157,9 +173,7 @@ public class Main extends JFrame {
 
 			@Override
 			public void keyReleased(KeyEvent e) {
-				// 백스페이스 뗄 때는 아무 동작 안 함
-				if (e.getKeyCode() == KeyEvent.VK_BACK_SPACE)
-					return;
+				if (e.getKeyCode() == KeyEvent.VK_BACK_SPACE) return;
 				String charKey = String.valueOf(e.getKeyChar());
 				Integer baseNote = keyMap.get(charKey);
 
@@ -168,33 +182,14 @@ public class Main extends JFrame {
 					keyStateMap.put(finalNote, false);
 					noteOFF(finalNote);
 				}
-
 			}
 		});
-		Thread th = new Thread() {
-			@Override
-			public void run() {
-				try {
-					while (true) {
-						textArea.append(" ");
-						textArea.setCaretPosition(textArea.getDocument().getLength());
-						Thread.sleep(250);
-					}
-				} catch (InterruptedException e) {
-					// TODO th-generated catch block
-					e.printStackTrace();
-				}
-			}
-
-		};
-//		th.start();
 	}
 
 	private void updateStatus() {
-		String status = String.format("Octave: %+d | Transpose: %+d | Sustain: %s", octaveOffset / 12, transposeOffset,
-				isSustainToggled ? "ON" : "OFF");
+		String status = String.format("Octave: %+d | Transpose: %+d | Sustain: %s (%dms)", 
+				octaveOffset / 12, transposeOffset, isSustainToggled ? "AUTO" : "OFF", pedalInterval);
 		setTitle("MIDI Controller - " + status);
-		System.out.println(status);
 	}
 
 	private void setFrame() {
@@ -202,9 +197,10 @@ public class Main extends JFrame {
 		add(textArea, BorderLayout.CENTER);
 		textArea.setFont(new Font("Consolas", Font.PLAIN, 24));
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		setSize(600, 400);
+		setSize(800, 500);
 		textArea.setBackground(Color.black);
 		textArea.setForeground(Color.white);
+		setLocationRelativeTo(null);
 		setVisible(true);
 	}
 
@@ -213,6 +209,7 @@ public class Main extends JFrame {
 		setKeyMap();
 		setTextArea();
 		setFrame();
+		updateStatus();
 	}
 
 	public static void main(String[] args) {

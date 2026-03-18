@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QWERTY MIDI Master - Sequence Explorer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@tonejs/midi"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+
+        :root {
+            --emerald: #10b981;
+            --emerald-glow: rgba(16, 185, 129, 0.4);
+        }
+
+        body {
+            font-family: 'JetBrains+Mono', monospace;
+            background-color: #020617;
+            color: #f8fafc;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 10px;
+        }
+
+        canvas {
+            touch-action: none;
+        }
+
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #10b981, #34d399);
+            width: 0%;
+            transition: width 0.1s linear;
+        }
+
+        .sequence-item {
+            transition: all 0.2s ease;
+            border-left: 3px solid transparent;
+        }
+
+        .sequence-item.active {
+            background: rgba(16, 185, 129, 0.15);
+            border-left-color: var(--emerald);
+        }
+
+        .key-capsule {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2px 8px;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 11px;
+            color: #94a3b8;
+        }
+
+        .key-capsule.hit {
+            background: var(--emerald);
+            color: white;
+            border-color: #34d399;
+        }
+
+        @keyframes pulse-border {
+            0% {
+                border-color: rgba(16, 185, 129, 0.3);
+            }
+
+            50% {
+                border-color: rgba(16, 185, 129, 0.8);
+            }
+
+            100% {
+                border-color: rgba(16, 185, 129, 0.3);
+            }
+        }
+
+        .active-wait {
+            animation: pulse-border 1.5s infinite;
+        }
+    </style>
+</head>
+
+<body class="flex flex-col h-screen">
+
+    <div class="flex-grow flex flex-col p-8 gap-6 max-w-[1920px] mx-auto w-full">
+        <!-- Header -->
+        <header class="flex justify-between items-end">
+            <div>
+                <h1
+                    class="text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-cyan-400 leading-none">
+                    QWERTY SEQUENCE MASTER
+                </h1>
+                <p class="text-slate-500 text-xs font-bold tracking-[0.3em] uppercase mt-2">Precision MIDI Learning
+                    Interface</p>
+            </div>
+            <div id="modeDisplay"
+                class="px-6 py-2 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 text-emerald-400 text-xs font-bold tracking-widest">
+                WAITING FOR MIDI...
+            </div>
+        </header>
+
+        <div class="flex-grow grid grid-cols-12 gap-8 min-h-0">
+            <!-- Left Side: Visualizer (9 cols) -->
+            <div class="col-span-8 flex flex-col gap-6 min-h-0">
+                <div
+                    class="relative flex-grow bg-black rounded-[40px] border border-slate-800 shadow-2xl overflow-hidden group">
+                    <canvas id="visualizer" class="w-full h-full"></canvas>
+
+                    <!-- Top Center Chord Overlay -->
+                    <div id="waitMessage" class="absolute top-10 left-1/2 -translate-x-1/2 hidden z-10">
+                        <div
+                            class="glass-panel px-10 py-5 rounded-[24px] flex flex-col items-center gap-4 border-emerald-500/20 active-wait">
+                            <span class="text-slate-500 text-[10px] font-black uppercase tracking-[0.4em]">Current
+                                Sequence</span>
+                            <div id="targetKeysContainer" class="flex gap-3"></div>
+                        </div>
+                    </div>
+
+                    <!-- Floating Player Bar -->
+                    <div
+                        class="absolute bottom-10 left-10 right-10 flex items-center gap-8 p-6 rounded-[32px] glass-panel opacity-0 group-hover:opacity-100 transition-all duration-500 transform translate-y-4 group-hover:translate-y-0 shadow-2xl">
+                        <button id="playBtn"
+                            class="bg-emerald-500 hover:bg-emerald-600 w-16 h-16 flex items-center justify-center rounded-2xl shadow-xl transition-all active:scale-90">
+                            <svg id="playIcon" class="w-8 h-8 fill-white" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z" />
+                            </svg>
+                        </button>
+                        <div class="flex-grow space-y-3">
+                            <div id="timeline" class="h-2 bg-slate-800 rounded-full cursor-pointer overflow-hidden">
+                                <div id="progressBar" class="progress-bar"></div>
+                            </div>
+                            <div
+                                class="flex justify-between text-[11px] font-bold text-slate-500 font-mono tracking-widest">
+                                <span id="timeDisplay">00:00.000</span>
+                                <span id="durationDisplay">00:00.000</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Control Panel -->
+                <div class="h-32 glass-panel rounded-[32px] p-8 grid grid-cols-4 gap-10">
+                    <div class="space-y-3">
+                        <label class="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-black">Mode</label>
+                        <div class="flex p-1 bg-slate-900/50 rounded-xl border border-white/5">
+                            <button id="modeAuto"
+                                class="flex-1 py-2 rounded-lg text-[10px] font-bold transition-all text-slate-500">AUTO</button>
+                            <button id="modePractice"
+                                class="flex-1 py-2 rounded-lg text-[10px] font-bold bg-emerald-500 text-white shadow-lg">PRACTICE</button>
+                        </div>
+                    </div>
+                    <div class="space-y-3">
+                        <div class="flex justify-between"><label
+                                class="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-black">Tempo</label><span
+                                id="speedVal" class="text-[10px] text-emerald-400 font-bold">1.0x</span></div>
+                        <input type="range" id="speed" min="0.1" max="2.0" step="0.1" value="1.0"
+                            class="w-full accent-emerald-500">
+                    </div>
+                    <div class="space-y-3">
+                        <div class="flex justify-between"><label
+                                class="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-black">Pitch</label><span
+                                id="transVal" class="text-[10px] text-emerald-400 font-bold">0</span></div>
+                        <input type="range" id="transpose" min="-12" max="12" value="0"
+                            class="w-full accent-emerald-500">
+                    </div>
+                    <div class="space-y-3">
+                        <div class="flex justify-between"><label
+                                class="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-black">Zoom</label><span
+                                id="zoomVal" class="text-[10px] text-emerald-400 font-bold">600</span></div>
+                        <input type="range" id="zoom" min="200" max="1200" value="600"
+                            class="w-full accent-emerald-500">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Side: Sequence & Text (4 cols) -->
+            <div class="col-span-4 flex flex-col gap-6 min-h-0">
+                <!-- Sequence List -->
+                <div class="flex-grow flex flex-col glass-panel rounded-[32px] p-8 min-h-0">
+                    <h2
+                        class="text-xs font-black uppercase text-emerald-500 tracking-[0.3em] mb-6 flex items-center gap-2">
+                        <span class="w-2 h-2 bg-emerald-500 rounded-full"></span> Sequence Timeline
+                    </h2>
+                    <div id="sequenceList" class="custom-scrollbar overflow-y-auto flex-grow space-y-1 pr-2">
+                        <p class="text-slate-600 text-xs italic">Upload a MIDI file to generate the play sequence...</p>
+                    </div>
+                </div>
+
+                <div class="h-1/4 glass-panel rounded-[32px] p-8 flex flex-col">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-[10px] font-black uppercase text-slate-500 tracking-[0.2em]">Raw Key Stream</h2>
+                        <button id="copyBtn"
+                            class="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-1.5 rounded-full transition-all">COPY</button>
+                    </div>
+                    <div id="resultArea"
+                        class="custom-scrollbar overflow-y-auto flex-grow text-emerald-400/40 font-mono text-[10px] leading-relaxed p-4 bg-black/40 rounded-2xl border border-white/5 select-all">
+                        // keys...
+                    </div>
+                </div>
+
+                <input type="file" id="midiInput" accept=".mid,.midi" class="hidden">
+                <button onclick="document.getElementById('midiInput').click()"
+                    class="py-6 bg-gradient-to-r from-emerald-600 to-emerald-400 text-white rounded-[24px] font-black text-xs tracking-[0.4em] hover:scale-[1.02] active:scale-[0.98] transition-all shadow-2xl shadow-emerald-500/20">
+                    IMPORT MIDI
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const keyMapData = {
+            "1": "C1", "2": "D1", "3": "E1", "4": "F1", "5": "G1", "6": "A1", "7": "B1",
+            "8": "C2", "9": "D2", "0": "E2", "q": "F2", "i": "G2", "w": "A2", "o": "B2",
+            "e": "C3", "p": "D3", "r": "E3", "a": "F3", "t": "G3", "y": "A3", "u": "B3",
+            "s": "C4", "d": "D4", "f": "E4", "g": "F4", "h": "G4", "j": "A4", "k": "B4",
+            "l": "C5", "z": "D5", "x": "E5", "c": "F5", "v": "G5", "b": "A5", "n": "B5",
+            "m": "C6",
+            "!": "C#1", "@": "D#1", "$": "F#1", "%": "G#1", "^": "A#1",
+            "*": "C#2", "(": "D#2", "I": "F#2", "O": "G#2", "P": "A#2",
+            "T": "C#3", "Y": "D#3", "S": "F#3", "D": "G#3", "G": "A#3",
+            "H": "C#4", "J": "D#4", "L": "F#4", "Z": "G#4", "C": "A#4",
+            "V": "C#5", "B": "D#5", "N": "F#5", "M": "G#5", ">": "A#5"
+        };
+
+        const pitchToChar = {};
+        Object.entries(keyMapData).forEach(([char, pitch]) => { pitchToChar[pitch] = char; });
+
+        const sampler = new Tone.Sampler({
+            urls: { A0: "A0.mp3", C1: "C1.mp3", "D#1": "Ds1.mp3", "F#1": "Fs1.mp3", A1: "A1.mp3", C2: "C2.mp3", "D#2": "Ds2.mp3", "F#2": "Fs2.mp3", A2: "A2.mp3", C3: "C3.mp3", "D#3": "Ds3.mp3", "F#3": "Fs3.mp3", A3: "A3.mp3", C4: "C4.mp3", "D#4": "Ds4.mp3", "F#4": "Fs4.mp3", A4: "A4.mp3", C5: "C5.mp3", "D#5": "Ds5.mp3", "F#5": "Fs5.mp3", A5: "A5.mp3", C6: "C6.mp3" },
+            release: 1, baseUrl: "https://tonejs.github.io/audio/salamander/"
+        }).toDestination();
+
+        const canvas = document.getElementById('visualizer');
+        const ctx = canvas.getContext('2d');
+        const midiInput = document.getElementById('midiInput');
+        const playBtn = document.getElementById('playBtn');
+        const resultArea = document.getElementById('resultArea');
+        const sequenceList = document.getElementById('sequenceList');
+        const progressBar = document.getElementById('progressBar');
+        const timeDisplay = document.getElementById('timeDisplay');
+        const durationDisplay = document.getElementById('durationDisplay');
+        const waitMessage = document.getElementById('waitMessage');
+        const targetKeysContainer = document.getElementById('targetKeysContainer');
+        const speedInput = document.getElementById('speed');
+        const transposeInput = document.getElementById('transpose');
+        const zoomInput = document.getElementById('zoom');
+
+        let currentMidi = null;
+        let isPlaying = false;
+        let isPracticeMode = true;
+        let startTime = 0;
+        let pauseTime = 0;
+        let lerpTime = 0;
+        let animationId = null;
+        let midiNotes = [];
+        let chordGroups = []; // [{time, keys: [], noteIds: []}]
+        let activeKeys = new Set();
+        let currentChordIndex = -1;
+
+        function resize() {
+            canvas.width = canvas.parentElement.clientWidth * window.devicePixelRatio;
+            canvas.height = canvas.parentElement.clientHeight * window.devicePixelRatio;
+            if (!isPlaying) draw(pauseTime);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // --- Core Logic: Chord Grouping ---
+        function groupNotesByTime() {
+            if (midiNotes.length === 0) return;
+            chordGroups = [];
+            const threshold = 0.08; // 80ms tolerance for chords
+
+            midiNotes.forEach((note, idx) => {
+                let group = chordGroups.find(g => Math.abs(g.time - note.time) < threshold);
+                if (!group) {
+                    group = { time: note.time, keys: [], noteIds: [], played: false };
+                    chordGroups.push(group);
+                }
+                group.keys.push(note.char);
+                group.noteIds.push(idx);
+            });
+            chordGroups.sort((a, b) => a.time - b.time);
+            renderSequenceUI();
+        }
+
+        function renderSequenceUI() {
+            sequenceList.innerHTML = '';
+            chordGroups.forEach((group, idx) => {
+                const item = document.createElement('div');
+                item.className = `sequence-item p-3 rounded-xl flex items-center justify-between group cursor-pointer hover:bg-white/5`;
+                item.id = `seq-${idx}`;
+                item.onclick = () => seekTo(group.time);
+
+                const timeStr = group.time.toFixed(2).padStart(5, '0');
+                const uniqueKeys = [...new Set(group.keys)];
+
+                item.innerHTML = `
+                    <div class="flex items-center gap-4">
+                        <span class="text-[10px] font-bold text-slate-600 font-mono">${timeStr}s</span>
+                        <div class="flex gap-1">
+                            ${uniqueKeys.map(k => `<span class="key-capsule">${k.toUpperCase()}</span>`).join('')}
+                        </div>
+                    </div>
+                    <span class="opacity-0 group-hover:opacity-100 text-[9px] font-bold text-emerald-500 tracking-tighter transition-all">SEEK</span>
+                `;
+                sequenceList.appendChild(item);
+            });
+        }
+
+        function updateSequenceFocus(time) {
+            const index = chordGroups.findIndex((g, i) => {
+                const next = chordGroups[i + 1];
+                return time >= g.time - 0.1 && (!next || time < next.time);
+            });
+
+            if (index !== currentChordIndex && index !== -1) {
+                if (currentChordIndex !== -1) {
+                    document.getElementById(`seq-${currentChordIndex}`)?.classList.remove('active');
+                }
+                const activeItem = document.getElementById(`seq-${index}`);
+                if (activeItem) {
+                    activeItem.classList.add('active');
+                    activeItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                currentChordIndex = index;
+            }
+        }
+
+        // --- Main Loop ---
+        function animate() {
+            if (!isPlaying) return;
+            const speed = parseFloat(speedInput.value);
+            let targetTime;
+
+            if (isPracticeMode) {
+                targetTime = pauseTime;
+                const nextChord = chordGroups.find(g => !g.played && g.time <= targetTime + 0.05);
+
+                if (nextChord) {
+                    waitMessage.classList.remove('hidden');
+                    updateTargetUI(nextChord);
+
+                    const allHit = nextChord.keys.every(k => activeKeys.has(k));
+                    if (allHit) {
+                        nextChord.played = true;
+                        nextChord.noteIds.forEach(id => midiNotes[id].played = true);
+                        const next = chordGroups.find(g => !g.played);
+                        pauseTime = next ? next.time : pauseTime + (0.016 * speed);
+                    }
+                } else {
+                    waitMessage.classList.add('hidden');
+                    pauseTime += (0.016 * speed);
+                }
+            } else {
+                const now = performance.now() / 1000;
+                targetTime = (now - startTime) * speed;
+                midiNotes.forEach(n => {
+                    if (!n.played && n.time <= targetTime) {
+                        sampler.triggerAttackRelease(n.pitch, n.duration);
+                        n.played = true;
+                    }
+                });
+            }
+
+            lerpTime += (targetTime - lerpTime) * 0.15;
+            updateSequenceFocus(lerpTime);
+            draw(lerpTime);
+
+            if (currentMidi && lerpTime > currentMidi.duration + 0.5) stopPlayback();
+            else animationId = requestAnimationFrame(animate);
+        }
+
+        function updateTargetUI(chord) {
+            targetKeysContainer.innerHTML = '';
+            const unique = [...new Set(chord.keys)];
+            unique.forEach(k => {
+                const span = document.createElement('span');
+                span.className = `key-capsule h-10 min-w-[40px] text-base ${activeKeys.has(k) ? 'hit' : ''}`;
+                span.innerText = k.toUpperCase();
+                targetKeysContainer.appendChild(span);
+            });
+        }
+
+        // --- Interaction ---
+        window.onkeydown = (e) => {
+            if (e.repeat) return;
+            const pitch = keyMapData[e.key];
+            if (!pitch) return;
+            activeKeys.add(e.key);
+            sampler.triggerAttackRelease(pitch, "4n");
+            if (isPlaying && isPracticeMode) draw(lerpTime);
+        };
+
+        window.onkeyup = (e) => {
+            activeKeys.delete(e.key);
+            if (isPlaying && isPracticeMode) draw(lerpTime);
+        };
+
+        // --- Drawing ---
+        function draw(time) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const zoom = parseFloat(zoomInput.value);
+            const speed = parseFloat(speedInput.value);
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+
+            if (currentMidi) {
+                progressBar.style.width = `${(time / currentMidi.duration) * 100}%`;
+                timeDisplay.innerText = formatTime(time);
+            }
+
+            // Draw Background Grid
+            ctx.strokeStyle = "rgba(51, 65, 85, 0.1)";
+            ctx.lineWidth = 1;
+            for (let i = 0; i < canvas.width; i += zoom / 4) {
+                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+            }
+
+            if (midiNotes.length === 0) return;
+
+            // Adaptive Vertical Scale
+            const midis = midiNotes.map(n => n.midi);
+            const minM = Math.min(...midis);
+            const maxM = Math.max(...midis);
+            const hScale = (canvas.height * 0.65) / Math.max(20, maxM - minM);
+            const mCenter = (minM + maxM) / 2;
+
+            midiNotes.forEach(n => {
+                const x = centerX + (n.time - time) * zoom * speed;
+                const y = centerY - (n.midi - mCenter) * hScale;
+                const isNear = Math.abs(n.time - time) < 0.05;
+
+                if (x > -zoom && x < canvas.width + zoom) {
+                    const alpha = Math.max(0, 1 - Math.abs(x - centerX) / (canvas.width / 1.5));
+
+                    if (isNear) {
+                        ctx.shadowBlur = 20; ctx.shadowColor = activeKeys.has(n.char) ? "#34d399" : "#10b981";
+                        ctx.fillStyle = activeKeys.has(n.char) ? "#fff" : "#10b981";
+                    } else {
+                        ctx.fillStyle = n.played && n.time < time ? `rgba(16, 185, 129, ${alpha * 0.1})` : `rgba(30, 41, 59, ${alpha})`;
+                    }
+
+                    const w = Math.max(12, n.duration * zoom * speed);
+                    drawRoundedRect(ctx, x, y - hScale / 2.5, w, hScale / 1.25, 6);
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+
+                    if (alpha > 0.6) {
+                        ctx.fillStyle = isNear ? "#000" : `rgba(148, 163, 184, ${alpha})`;
+                        ctx.font = "bold 11px JetBrains Mono";
+                        ctx.textAlign = "center";
+                        ctx.fillText(n.char.toUpperCase(), x + 10, y + 4);
+                    }
+                }
+            });
+
+            // Center Line
+            const grad = ctx.createLinearGradient(centerX, 0, centerX, canvas.height);
+            grad.addColorStop(0, "transparent"); grad.addColorStop(0.5, "rgba(16, 185, 129, 0.5)"); grad.addColorStop(1, "transparent");
+            ctx.strokeStyle = grad; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(centerX, 0); ctx.lineTo(centerX, canvas.height); ctx.stroke();
+        }
+
+        function drawRoundedRect(ctx, x, y, w, h, r) {
+            ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.closePath();
+        }
+
+        function formatTime(s) {
+            const m = Math.floor(s / 60).toString().padStart(2, '0');
+            const sec = Math.floor(s % 60).toString().padStart(2, '0');
+            const ms = Math.floor((s % 1) * 1000).toString().padStart(3, '0');
+            return `${m}:${sec}.${ms}`;
+        }
+
+        function seekTo(time) {
+            pauseTime = time;
+            lerpTime = time;
+            midiNotes.forEach(n => n.played = n.time < time - 0.05);
+            chordGroups.forEach(g => g.played = g.time < time - 0.05);
+            if (isPlaying && !isPracticeMode) startTime = (performance.now() / 1000) - (time / parseFloat(speedInput.value));
+            draw(time);
+        }
+
+        // --- Events ---
+        midiInput.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (ev) => {
+                currentMidi = new Midi(ev.target.result);
+                document.getElementById('modeDisplay').innerText = "MIDI READY: PRACTICE";
+                processMidiData();
+            };
+            reader.readAsArrayBuffer(file);
+        };
+
+        function processMidiData() {
+            const transpose = parseInt(transposeInput.value);
+            midiNotes = [];
+            currentMidi.tracks.forEach(track => {
+                track.notes.forEach(note => {
+                    const m = note.midi + transpose;
+                    const pitch = Tone.Frequency(m, "midi").toNote();
+                    midiNotes.push({ time: note.time, duration: note.duration, midi: m, pitch: pitch, char: pitchToChar[pitch] || "?", played: false });
+                });
+            });
+            midiNotes.sort((a, b) => a.time - b.time);
+            groupNotesByTime();
+            resultArea.innerText = midiNotes.map(n => n.char).join("");
+            durationDisplay.innerText = formatTime(currentMidi.duration);
+            seekTo(0);
+        }
+
+        playBtn.onclick = () => {
+            if (!currentMidi) return;
+            Tone.start();
+            if (isPlaying) stopPlayback();
+            else {
+                isPlaying = true;
+                if (!isPracticeMode) startTime = (performance.now() / 1000) - (pauseTime / parseFloat(speedInput.value));
+                playBtn.innerHTML = '<svg class="w-10 h-10 fill-white" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+                animate();
+            }
+        };
+
+        function stopPlayback() {
+            isPlaying = false;
+            cancelAnimationFrame(animationId);
+            playBtn.innerHTML = '<svg class="w-10 h-10 fill-white" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+            waitMessage.classList.add('hidden');
+        }
+
+        modeAuto.onclick = () => {
+            isPracticeMode = false;
+            modeAuto.className = "flex-1 py-2 rounded-lg text-[10px] font-bold bg-emerald-500 text-white shadow-lg";
+            modePractice.className = "flex-1 py-2 rounded-lg text-[10px] font-bold text-slate-500";
+            if (isPlaying) startTime = (performance.now() / 1000) - (lerpTime / parseFloat(speedInput.value));
+        };
+
+        modePractice.onclick = () => {
+            isPracticeMode = true;
+            modePractice.className = "flex-1 py-2 rounded-lg text-[10px] font-bold bg-emerald-500 text-white shadow-lg";
+            modeAuto.className = "flex-1 py-2 rounded-lg text-[10px] font-bold text-slate-500";
+            pauseTime = lerpTime;
+        };
+
+        speedInput.oninput = (e) => {
+            document.getElementById('speedVal').innerText = e.target.value + 'x';
+            if (isPlaying && !isPracticeMode) startTime = (performance.now() / 1000) - (lerpTime / parseFloat(e.target.value));
+        };
+        transposeInput.oninput = (e) => { document.getElementById('transVal').innerText = e.target.value; processMidiData(); };
+        zoomInput.oninput = (e) => { document.getElementById('zoomVal').innerText = e.target.value; draw(lerpTime); };
+
+        document.getElementById('copyBtn').onclick = () => {
+            navigator.clipboard.writeText(resultArea.innerText);
+            const b = document.getElementById('copyBtn'); b.innerText = "COPIED!"; setTimeout(() => b.innerText = "COPY", 2000);
+        };
+
+        timeline.onmousedown = (e) => {
+            if (!currentMidi) return;
+            const r = timeline.getBoundingClientRect();
+            seekTo(((e.clientX - r.left) / r.width) * currentMidi.duration);
+        };
+    </script>
+</body>
+
+</html>

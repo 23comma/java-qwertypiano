@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QWERTY MIDI Visualizer ✨ Precise Sync</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@tonejs/midi"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+
+        :root {
+            --active-color: #10b981;
+            --active-color-dark: #059669;
+            --glow-strength: 15px;
+        }
+
+        body {
+            font-family: 'JetBrains+Mono', monospace;
+            background-color: #020617;
+            color: #f8fafc;
+            overflow-x: hidden;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 10px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+
+        canvas {
+            touch-action: none;
+            cursor: crosshair;
+        }
+
+        .control-panel {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .progress-container {
+            height: 10px;
+            background: #1e293b;
+            cursor: pointer;
+            position: relative;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #10b981, #34d399);
+            width: 0%;
+            transition: width 0.05s linear;
+        }
+    </style>
+</head>
+
+<body class="p-4 md:p-8 min-h-screen flex flex-col items-center">
+
+    <div class="max-w-6xl w-full space-y-6">
+        <!-- Header -->
+        <header class="text-center space-y-2">
+            <h1 class="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-cyan-400">
+                MIDI VISUALIZER
+            </h1>
+            <p class="text-slate-400 text-sm">Enhanced Time Resolution & Grid System</p>
+        </header>
+
+        <!-- Main Workspace -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+            <!-- Visualization Area -->
+            <div class="lg:col-span-8 space-y-4">
+                <div
+                    class="relative bg-slate-950 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden aspect-video group">
+                    <canvas id="visualizer" class="w-full h-full"></canvas>
+
+                    <!-- Overlay Controls -->
+                    <div
+                        class="absolute bottom-4 left-4 right-4 flex items-center gap-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button id="playBtn"
+                            class="bg-emerald-500 hover:bg-emerald-600 p-3 rounded-full shadow-lg transition-transform active:scale-95">
+                            <svg id="playIcon" class="w-6 h-6 fill-white" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z" />
+                            </svg>
+                        </button>
+                        <div id="timeline" class="progress-container flex-grow">
+                            <div id="progressBar" class="progress-bar"></div>
+                        </div>
+                        <span id="timeDisplay"
+                            class="text-[10px] font-mono font-bold w-24 text-emerald-400">00:00.000</span>
+                    </div>
+                </div>
+
+                <!-- Controls Card -->
+                <div class="control-panel p-6 rounded-2xl grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="space-y-2">
+                        <label class="text-xs uppercase tracking-widest text-slate-500 font-bold">Transpose</label>
+                        <div class="flex items-center gap-3">
+                            <input type="range" id="transpose" min="-24" max="24" value="0"
+                                class="flex-grow accent-emerald-500">
+                            <span id="transValue" class="text-emerald-400 font-bold w-8 text-center">0</span>
+                        </div>
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-xs uppercase tracking-widest text-slate-500 font-bold">Speed</label>
+                        <div class="flex items-center gap-3">
+                            <input type="range" id="speed" min="0.1" max="2.0" step="0.1" value="1.0"
+                                class="flex-grow accent-emerald-500">
+                            <span id="speedValue" class="text-emerald-400 font-bold w-8 text-center">1.0</span>
+                        </div>
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-xs uppercase tracking-widest text-slate-500 font-bold">Zoom (Scroll)</label>
+                        <div class="flex items-center gap-3">
+                            <input type="range" id="zoom" min="50" max="1000" value="200"
+                                class="flex-grow accent-emerald-500">
+                            <span id="zoomValue" class="text-emerald-400 font-bold w-12 text-center">200</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Editor / Result Area -->
+            <div class="lg:col-span-4 flex flex-col gap-4">
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col h-full min-h-[400px]">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xs font-bold uppercase text-slate-500 tracking-tighter">Keyboard Text</h2>
+                        <button id="copyBtn"
+                            class="text-[10px] bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded-md transition-colors">COPY</button>
+                    </div>
+                    <div id="resultArea"
+                        class="custom-scrollbar overflow-y-auto flex-grow text-emerald-300/80 font-mono text-xs leading-relaxed p-2 select-all">
+                        // MIDI data will appear here...
+                    </div>
+                </div>
+
+                <input type="file" id="midiInput" accept=".mid,.midi" class="hidden">
+                <button onclick="document.getElementById('midiInput').click()"
+                    class="w-full py-4 bg-gradient-to-r from-slate-800 to-slate-900 border border-slate-700 rounded-2xl font-bold hover:border-emerald-500/50 transition-all active:scale-[0.98]">
+                    UPLOAD MIDI FILE
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Core Variables ---
+        const canvas = document.getElementById('visualizer');
+        const ctx = canvas.getContext('2d');
+        const midiInput = document.getElementById('midiInput');
+        const playBtn = document.getElementById('playBtn');
+        const resultArea = document.getElementById('resultArea');
+        const progressBar = document.getElementById('progressBar');
+        const timeline = document.getElementById('timeline');
+        const timeDisplay = document.getElementById('timeDisplay');
+
+        const transposeInput = document.getElementById('transpose');
+        const speedInput = document.getElementById('speed');
+        const zoomInput = document.getElementById('zoom');
+
+        let currentMidi = null;
+        let isPlaying = false;
+        let startTime = 0;
+        let pauseTime = 0;
+        let animationId = null;
+        let midiNotes = [];
+
+        // --- Keyboard Map ---
+        const QWERTY_MAP = "1234567890qwertyuiopasdfghjklzxcvbnm";
+
+        function resize() {
+            canvas.width = canvas.parentElement.clientWidth * window.devicePixelRatio;
+            canvas.height = canvas.parentElement.clientHeight * window.devicePixelRatio;
+            if (!isPlaying) draw(pauseTime);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // --- MIDI Processing ---
+        midiInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                const midi = new Midi(event.target.result);
+                currentMidi = midi;
+                processMidi();
+                resetPlayback();
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        function processMidi() {
+            if (!currentMidi) return;
+            const transpose = parseInt(transposeInput.value);
+            midiNotes = [];
+            let textOutput = "";
+
+            currentMidi.tracks.forEach(track => {
+                track.notes.forEach(note => {
+                    const transposedPitch = note.midi + transpose;
+                    const charIndex = (transposedPitch - 21) % QWERTY_MAP.length;
+                    const char = QWERTY_MAP[Math.max(0, charIndex)];
+
+                    midiNotes.push({
+                        time: note.time,
+                        duration: note.duration,
+                        midi: transposedPitch,
+                        char: char,
+                        velocity: note.velocity
+                    });
+                    textOutput += char;
+                });
+            });
+
+            midiNotes.sort((a, b) => a.time - b.time);
+            resultArea.innerText = textOutput;
+        }
+
+        // --- Rendering ---
+        function draw(currentTime) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const zoom = parseFloat(zoomInput.value);
+            const speed = parseFloat(speedInput.value);
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+
+            // 1. Time Display Update (Precise)
+            const duration = currentMidi ? currentMidi.duration : 1;
+            const percent = (currentTime / duration) * 100;
+            progressBar.style.width = `${Math.min(100, percent)}%`;
+
+            const mins = Math.floor(currentTime / 60).toString().padStart(2, '0');
+            const secs = Math.floor(currentTime % 60).toString().padStart(2, '0');
+            const ms = Math.floor((currentTime % 1) * 1000).toString().padStart(3, '0');
+            timeDisplay.innerText = `${mins}:${secs}.${ms}`;
+
+            // 2. Draw Time Grid (Detailed Segmentation)
+            drawGrid(currentTime, zoom, speed, centerX);
+
+            if (!midiNotes.length) return;
+
+            // 3. Draw Notes
+            midiNotes.forEach(note => {
+                const xOffset = (note.time - currentTime) * zoom * speed;
+                const x = centerX + xOffset;
+                const y = centerY + (60 - note.midi) * 15;
+
+                if (x > -200 && x < canvas.width + 200) {
+                    const alpha = Math.max(0, 1 - Math.abs(xOffset) / (canvas.width / 1.5));
+                    const isHitting = Math.abs(xOffset) < 3;
+
+                    // Note Color/Glow
+                    ctx.fillStyle = isHitting ? `rgba(52, 211, 153, 1)` : `rgba(30, 41, 59, ${alpha * 0.9})`;
+                    if (isHitting) {
+                        ctx.shadowBlur = 15;
+                        ctx.shadowColor = "#10b981";
+                    }
+
+                    const width = Math.max(4, note.duration * zoom * speed);
+                    drawRoundedRect(ctx, x, y - 6, width, 12, 4);
+                    ctx.fill();
+                    ctx.shadowBlur = 0; // Reset shadow
+
+                    // Note Text
+                    if (alpha > 0.4) {
+                        ctx.font = `${isHitting ? 'bold 13px' : '11px'} JetBrains Mono`;
+                        ctx.fillStyle = isHitting ? '#fff' : `rgba(148, 163, 184, ${alpha})`;
+                        ctx.textAlign = "center";
+                        ctx.fillText(note.char.toUpperCase(), x + 8, y - 14);
+                    }
+                }
+            });
+
+            // Playhead Center Line
+            ctx.strokeStyle = "rgba(16, 185, 129, 0.5)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(centerX, 0);
+            ctx.lineTo(centerX, canvas.height);
+            ctx.stroke();
+        }
+
+        function drawGrid(currentTime, zoom, speed, centerX) {
+            // Seconds lines
+            const startSec = Math.floor(currentTime - (centerX / (zoom * speed)));
+            const endSec = Math.ceil(currentTime + (centerX / (zoom * speed)));
+
+            for (let s = startSec; s <= endSec; s++) {
+                const x = centerX + (s - currentTime) * zoom * speed;
+
+                // 1초 단위 실선
+                ctx.strokeStyle = "rgba(51, 65, 85, 0.3)";
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+
+                // 초 텍스트 표시
+                if (zoom > 100) {
+                    ctx.fillStyle = "rgba(148, 163, 184, 0.4)";
+                    ctx.font = "10px JetBrains Mono";
+                    ctx.textAlign = "left";
+                    ctx.fillText(s + "s", x + 4, 20);
+                }
+
+                // 0.1초 단위 점선 (줌이 충분할 때만)
+                if (zoom > 300) {
+                    for (let ms = 1; ms < 10; ms++) {
+                        const msX = x + (ms * 0.1) * zoom * speed;
+                        ctx.strokeStyle = "rgba(51, 65, 85, 0.1)";
+                        ctx.beginPath();
+                        ctx.setLineDash([5, 5]);
+                        ctx.moveTo(msX, 0);
+                        ctx.lineTo(msX, canvas.height);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
+                }
+            }
+        }
+
+        function drawRoundedRect(ctx, x, y, width, height, radius) {
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + width - radius, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+            ctx.lineTo(x + width, y + height - radius);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            ctx.lineTo(x + radius, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+        }
+
+        // --- Controls & Events ---
+        function animate() {
+            if (!isPlaying) return;
+            const now = performance.now() / 1000;
+            const elapsed = (now - startTime) * parseFloat(speedInput.value);
+            draw(elapsed);
+
+            if (currentMidi && elapsed > currentMidi.duration) {
+                stopPlayback();
+            } else {
+                animationId = requestAnimationFrame(animate);
+            }
+        }
+
+        function togglePlay() {
+            if (!currentMidi) return;
+            if (isPlaying) {
+                pauseTime = (performance.now() / 1000 - startTime) * parseFloat(speedInput.value);
+                stopPlayback();
+            } else {
+                isPlaying = true;
+                startTime = performance.now() / 1000 - (pauseTime / parseFloat(speedInput.value));
+                document.getElementById('playIcon').innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
+                animate();
+            }
+        }
+
+        function stopPlayback() {
+            isPlaying = false;
+            cancelAnimationFrame(animationId);
+            document.getElementById('playIcon').innerHTML = '<path d="M8 5v14l11-7z"/>';
+        }
+
+        function resetPlayback() {
+            stopPlayback();
+            pauseTime = 0;
+            draw(0);
+        }
+
+        function seek(e) {
+            if (!currentMidi) return;
+            const rect = timeline.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const percent = Math.max(0, Math.min(1, x / rect.width));
+            const newTime = percent * currentMidi.duration;
+
+            pauseTime = newTime;
+            if (isPlaying) {
+                startTime = performance.now() / 1000 - (pauseTime / parseFloat(speedInput.value));
+            } else {
+                draw(pauseTime);
+            }
+        }
+
+        timeline.addEventListener('mousedown', (e) => {
+            seek(e);
+            const moveHandler = (moveEvent) => seek(moveEvent);
+            const upHandler = () => {
+                window.removeEventListener('mousemove', moveHandler);
+                window.removeEventListener('mouseup', upHandler);
+            };
+            window.addEventListener('mousemove', moveHandler);
+            window.addEventListener('mouseup', upHandler);
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            let val = parseInt(zoomInput.value);
+            if (e.deltaY < 0) val = Math.min(1000, val + 25);
+            else val = Math.max(50, val - 25);
+
+            zoomInput.value = val;
+            document.getElementById('zoomValue').innerText = val;
+            if (!isPlaying) draw(pauseTime);
+        }, { passive: false });
+
+        playBtn.addEventListener('click', togglePlay);
+
+        transposeInput.addEventListener('input', (e) => {
+            document.getElementById('transValue').innerText = e.target.value;
+            processMidi();
+            if (!isPlaying) draw(pauseTime);
+        });
+
+        speedInput.addEventListener('input', (e) => {
+            document.getElementById('speedValue').innerText = e.target.value;
+            if (isPlaying) {
+                const currentElapsed = (performance.now() / 1000 - startTime) * parseFloat(speedInput.value);
+                startTime = performance.now() / 1000 - (currentElapsed / parseFloat(e.target.value));
+            }
+        });
+
+        zoomInput.addEventListener('input', (e) => {
+            document.getElementById('zoomValue').innerText = e.target.value;
+            if (!isPlaying) draw(pauseTime);
+        });
+
+        document.getElementById('copyBtn').addEventListener('click', () => {
+            const text = resultArea.innerText;
+            const temp = document.createElement("textarea");
+            document.body.appendChild(temp);
+            temp.value = text;
+            temp.select();
+            document.execCommand('copy');
+            document.body.removeChild(temp);
+            const b = document.getElementById('copyBtn');
+            b.innerText = "COPIED!";
+            setTimeout(() => b.innerText = "COPY", 2000);
+        });
+    </script>
+</body>
+
+</html>

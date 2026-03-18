@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QWERTY MIDI Visualizer ✨ AI & Audio Sync</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Libraries -->
+    <script src="https://unpkg.com/@tonejs/midi"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        :root {
+            --active-color: #10b981;
+            --active-color-dark: #059669;
+            --glow-strength: 15px;
+        }
+
+        * { box-sizing: border-box; }
+        body { font-family: 'JetBrains+Mono', monospace; overflow-x: hidden; background-color: #020617; }
+        
+        ::selection {
+            background-color: var(--active-color);
+            color: white;
+        }
+
+        .sheet-container {
+            white-space: pre-wrap;
+            word-break: break-all;
+            line-height: 2.4; 
+            font-size: 14px;
+            color: #475569;
+            transition: color 0.3s;
+        }
+
+        .note-active {
+            color: var(--active-color) !important;
+            text-shadow: 0 0 12px var(--active-color);
+            font-weight: 800;
+            background: rgba(16, 185, 129, 0.15); 
+            border-radius: 4px;
+            padding: 1px 2px;
+            transition: all 0.05s ease;
+        }
+
+        .visualizer-scroll-wrapper {
+            overflow: hidden;
+            background: #000;
+            border-radius: 1.5rem;
+            border: 4px solid #1e293b;
+            position: relative;
+            transition: border-color 0.5s ease;
+        }
+
+        .visualizer-content {
+            width: 100%;
+            position: relative;
+        }
+
+        #keyboardContainer {
+            position: relative;
+            height: 120px;
+            background: #000;
+            user-select: none;
+            overflow: hidden;
+            border-top: 2px solid #334155;
+            width: 100%;
+        }
+
+        .piano-key {
+            position: absolute;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding-bottom: 8px;
+            font-size: 10px;
+            font-weight: 800;
+            transition: background 0.05s, transform 0.05s, box-shadow 0.1s;
+            cursor: pointer;
+        }
+
+        .white-key {
+            height: 100%;
+            bottom: 0;
+            background: linear-gradient(to bottom, #f8fafc 0%, #cbd5e1 100%);
+            color: #334155;
+            z-index: 1;
+            border: 1px solid #94a3b8;
+            border-radius: 0 0 4px 4px;
+        }
+
+        .black-key {
+            height: 60%;
+            top: 0;
+            background: linear-gradient(to bottom, #475569 0%, #0f172a 100%);
+            color: #f1f5f9;
+            z-index: 2;
+            border: 1px solid #000;
+            border-radius: 0 0 3px 3px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.5);
+            padding-bottom: 4px;
+            font-size: 9px;
+        }
+        
+        .key-active.white-key {
+            background: var(--active-color) !important;
+            color: white !important;
+            transform: translateY(1px);
+            box-shadow: 0 0 var(--glow-strength) var(--active-color);
+        }
+
+        .key-active.black-key {
+            background: var(--active-color-dark) !important;
+            color: white !important;
+            height: 62%; 
+            box-shadow: 0 0 var(--glow-strength) var(--active-color);
+        }
+
+        canvas { image-rendering: auto; display: block; position: relative; z-index: 5; }
+        
+        #bgImageContainer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            opacity: 0.2; z-index: 1;
+            background-size: cover; background-position: center;
+            transition: opacity 1.2s ease;
+        }
+
+        .sheet-frame {
+            border: 2px solid #1e293b;
+            transition: border-color 0.5s ease, box-shadow 0.5s ease;
+            background: rgba(15, 23, 42, 0.85);
+            height: 480px; 
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        .sheet-frame.active {
+            border-color: var(--active-color);
+            box-shadow: 0 0 30px rgba(0,0,0,0.3), inset 0 0 15px var(--active-color-dark);
+        }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+        .loading-pulse {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .3; }
+        }
+    </style>
+</head>
+<body class="text-slate-100 min-h-screen pb-12">
+
+    <div class="max-w-7xl mx-auto p-4 md:p-8">
+        <header class="mb-8 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div class="text-center md:text-left">
+                <h1 class="text-3xl font-black text-indigo-400 tracking-tight italic">QWERTY MIDI <span class="text-white not-italic">AI SYNC</span></h1>
+                <p class="text-sm text-slate-500 font-medium uppercase tracking-[0.2em] mt-1">Professional Sheet Output & Layout</p>
+            </div>
+            
+            <div class="flex flex-wrap justify-center items-center gap-4 bg-slate-900/80 backdrop-blur-md p-3 rounded-2xl border border-slate-800 shadow-2xl">
+                <input type="file" id="midiInput" accept=".mid,.midi" class="hidden"/>
+                <label for="midiInput" class="cursor-pointer bg-slate-800 hover:bg-slate-700 text-sm font-bold py-2.5 px-6 rounded-xl transition-all active:scale-95">파일 선택</label>
+                <div class="h-8 w-[1px] bg-slate-700 mx-1"></div>
+                <button id="playBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold py-2.5 px-8 rounded-xl transition-all active:scale-95 disabled:opacity-40" disabled>재생</button>
+                <button id="stopBtn" class="bg-slate-800 hover:bg-rose-600 text-white text-sm font-bold py-2.5 px-6 rounded-xl transition-all active:scale-95 disabled:opacity-40" disabled>정지</button>
+                <div class="h-8 w-[1px] bg-slate-700 mx-1"></div>
+                <button id="aiAnalyzeBtn" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-sm font-bold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-40" disabled>✨ AI 분석</button>
+            </div>
+        </header>
+
+        <!-- 비주얼라이저 섹션 -->
+        <div class="visualizer-scroll-wrapper shadow-2xl mb-8 overflow-hidden" id="visWrapper">
+            <div class="visualizer-content w-full" id="visContent">
+                <div id="bgImageContainer"></div>
+                
+                <div class="absolute top-6 left-6 z-20 flex gap-4 pointer-events-none">
+                    <div class="bg-black/80 backdrop-blur-xl px-4 py-2 rounded-xl border border-white/10 shadow-2xl">
+                        <span class="text-[10px] text-indigo-400 block uppercase font-black mb-0.5">Time</span>
+                        <span id="timeDisplay" class="text-2xl font-mono font-bold tracking-tighter text-white">00:00</span>
+                    </div>
+                    <div class="bg-black/80 backdrop-blur-xl px-4 py-2 rounded-xl border border-white/10 shadow-2xl">
+                        <span class="text-[10px] text-indigo-400 block uppercase font-black mb-0.5">Status</span>
+                        <span id="statusDisplay" class="text-sm font-bold text-white font-mono tracking-widest">READY</span>
+                    </div>
+                </div>
+
+                <canvas id="gameCanvas" class="w-full h-[380px]"></canvas>
+                <div id="keyboardContainer" class="w-full"></div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+            <!-- 설정 패널 -->
+            <div class="lg:col-span-4 flex flex-col gap-6">
+                <div class="bg-slate-900/50 p-6 rounded-3xl border border-slate-800 shadow-xl backdrop-blur-sm flex-1">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-xs font-black text-slate-500 uppercase tracking-widest">Settings</h3>
+                        <button id="autoFixBtn" class="text-indigo-400 hover:text-indigo-300 text-[10px] font-black uppercase transition-colors">Auto-Fix Range</button>
+                    </div>
+                    <div class="space-y-6">
+                        <div>
+                            <div class="flex justify-between text-[10px] mb-2 uppercase font-black text-slate-400">
+                                <span>Transpose (전조)</span>
+                                <span id="transValue" class="text-indigo-400 font-bold">0</span>
+                            </div>
+                            <input type="range" id="transpose" min="-48" max="48" value="0" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500">
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-[10px] mb-2 uppercase font-black text-slate-400">
+                                <span>Scroll Speed</span>
+                                <span id="speedValue" class="text-indigo-400 font-bold">1.0</span>
+                            </div>
+                            <input type="range" id="speed" min="0.5" max="2.0" step="0.1" value="1.0" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500">
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-[10px] mb-2 uppercase font-black text-slate-400">
+                                <span>Zoom (Note Height)</span>
+                                <span id="zoomValue" class="text-indigo-400 font-bold">200</span>
+                            </div>
+                            <input type="range" id="zoom" min="50" max="600" value="200" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500">
+                        </div>
+                    </div>
+
+                    <div id="aiSection" class="mt-8 bg-indigo-950/20 p-5 rounded-2xl border border-purple-500/20 shadow-2xl hidden transition-all">
+                        <h3 class="text-xs font-black text-purple-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                            ✨ AI Insight
+                            <div id="aiLoading" class="hidden"><span class="flex h-2 w-2 rounded-full bg-purple-400 loading-pulse"></span></div>
+                        </h3>
+                        <div id="aiContent" class="text-sm text-slate-300 space-y-4">
+                            <p id="aiMood" class="font-bold text-purple-200 text-xs"></p>
+                            <p id="aiTips" class="italic text-slate-400 leading-relaxed text-[11px]"></p>
+                            <button id="ttsBtn" class="w-full flex justify-center items-center gap-2 text-[11px] text-purple-400 hover:text-white border border-purple-400/30 hover:bg-purple-600/20 py-2 rounded-xl transition-all">
+                                🔊 Voice Guide
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 악보 출력 -->
+            <div class="lg:col-span-8 bg-slate-900/50 rounded-3xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col">
+                <div class="px-6 py-4 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center">
+                    <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest">QWERTY Sheet Output</h3>
+                    <div class="flex gap-2">
+                        <button id="copyBtn" class="text-[10px] bg-slate-800 hover:bg-indigo-600 px-4 py-1.5 rounded-xl text-white font-black transition-all active:scale-95">COPY TEXT</button>
+                    </div>
+                </div>
+                <div id="sheetFrame" class="m-3 p-4 overflow-y-auto rounded-2xl sheet-frame">
+                    <div id="resultArea" class="sheet-container font-mono tracking-tighter text-slate-300">
+                        MIDI 파일을 업로드하여 AI 기반 정밀 악보를 생성하세요.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const apiKey = "";
+        
+        async function fetchWithRetry(url, options, retries = 5, backoff = 1000) {
+            try {
+                const response = await fetch(url, options);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                return await response.json();
+            } catch (err) {
+                if (retries > 0) {
+                    await new Promise(resolve => setTimeout(resolve, backoff));
+                    return fetchWithRetry(url, options, retries - 1, backoff * 2);
+                }
+                throw err;
+            }
+        }
+
+        let sampler = null;
+        let isSamplesLoaded = false;
+
+        function initAudio() {
+            if (sampler) return;
+            sampler = new Tone.Sampler({
+                urls: {
+                    "A0": "A0.mp3", "C1": "C1.mp3", "D#1": "Ds1.mp3", "F#1": "Fs1.mp3", "A1": "A1.mp3",
+                    "C2": "C2.mp3", "D#2": "Ds2.mp3", "F#2": "Fs2.mp3", "A2": "A2.mp3",
+                    "C3": "C3.mp3", "D#3": "Ds3.mp3", "F#3": "Fs3.mp3", "A3": "A3.mp3",
+                    "C4": "C4.mp3", "D#4": "Ds4.mp3", "F#4": "Fs4.mp3", "A4": "A4.mp3",
+                    "C5": "C5.mp3", "D#5": "Ds5.mp3", "F#5": "Fs5.mp3", "A5": "A5.mp3",
+                    "C6": "C6.mp3", "D#6": "Ds6.mp3", "F#6": "Fs6.mp3", "A6": "A6.mp3",
+                    "C7": "C7.mp3", "D#7": "Ds7.mp3", "F#7": "Fs7.mp3", "A7": "A7.mp3",
+                    "C8": "C8.mp3"
+                },
+                release: 1,
+                baseUrl: "https://tonejs.github.io/audio/salamander/",
+                onload: () => {
+                    isSamplesLoaded = true;
+                    statusDisplay.innerText = "READY (SAMPLES LOADED)";
+                }
+            }).toDestination();
+        }
+
+        function noteNameToPitch(name) {
+            const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+            const octave = parseInt(name.slice(-1));
+            const note = name.slice(0, -1);
+            return (octave + 1) * 12 + notes.indexOf(note);
+        }
+
+        // 'm' (C6) 키까지만 포함하도록 정밀 조정된 매핑
+        const keyMapData = {
+            // 흰 건반
+            "1": "C1", "2": "D1", "3": "E1", "4": "F1", "5": "G1", "6": "A1", "7": "B1",
+            "8": "C2", "9": "D2", "0": "E2", "q": "F2", "i": "G2", "w": "A2", "o": "B2",
+            "e": "C3", "p": "D3", "r": "E3", "a": "F3", "t": "G3", "y": "A3", "u": "B3",
+            "s": "C4", "d": "D4", "f": "E4", "g": "F4", "h": "G4", "j": "A4", "k": "B4",
+            "l": "C5", "z": "D5", "x": "E5", "c": "F5", "v": "G5", "b": "A5", "n": "B5", 
+            "m": "C6", 
+            // 검은 건반
+            "!": "C#1", "@": "D#1", "$": "F#1", "%": "G#1", "^": "A#1", 
+            "*": "C#2", "(": "D#2", "I": "F#2", "O": "G#2", "P": "A#2",
+            "T": "C#3", "Y": "D#3", "S": "F#3", "D": "G#3", "G": "A#3",
+            "H": "C#4", "J": "D#4", "L": "F#4", "Z": "G#4", "C": "A#4",
+            "V": "C#5", "B": "D#5", "N": "F#5", "M": "G#5", ">": "A#5"
+        };
+
+        const keyOrder = Object.keys(keyMapData).sort((a, b) => noteNameToPitch(keyMapData[a]) - noteNameToPitch(keyMapData[b]));
+        const reverseMap = {};
+        const whiteKeys = [];
+        const blackKeys = [];
+
+        keyOrder.forEach((key, idx) => {
+            const noteName = keyMapData[key];
+            const isBlack = noteName.includes('#');
+            const data = { key, index: idx, isBlack, noteName };
+            reverseMap[noteName] = data;
+            if (isBlack) blackKeys.push(data);
+            else whiteKeys.push(data);
+        });
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const kbContainer = document.getElementById('keyboardContainer');
+        const visContent = document.getElementById('visContent');
+        const midiInput = document.getElementById('midiInput');
+        const resultArea = document.getElementById('resultArea');
+        const playBtn = document.getElementById('playBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const aiAnalyzeBtn = document.getElementById('aiAnalyzeBtn');
+        const timeDisplay = document.getElementById('timeDisplay');
+        const statusDisplay = document.getElementById('statusDisplay');
+        const transposeInput = document.getElementById('transpose');
+        const autoFixBtn = document.getElementById('autoFixBtn');
+        const speedInput = document.getElementById('speed');
+        const zoomInput = document.getElementById('zoom');
+        const bgImageContainer = document.getElementById('bgImageContainer');
+        const visWrapper = document.getElementById('visWrapper');
+        const sheetFrame = document.getElementById('sheetFrame');
+
+        let currentMidi = null;
+        let processedNotes = [];
+        let isPlaying = false;
+        let startTime = 0;
+        let pausedTime = 0;
+        let lastTriggerTime = 0;
+        let animationId = null;
+        let activeKeys = new Set();
+        let keyPositions = []; 
+        let aiAnalysisResult = null;
+        let sheetSpans = []; 
+        let maxFileTime = 0; 
+
+        function renderKeyboard() {
+            kbContainer.innerHTML = '';
+            keyPositions = new Array(keyOrder.length);
+            const totalWhite = whiteKeys.length;
+            const whiteWidth = 100 / totalWhite;
+            
+            whiteKeys.forEach((k, idx) => {
+                const div = document.createElement('div');
+                div.id = `key-${k.key}`;
+                div.className = 'piano-key white-key';
+                div.style.width = `${whiteWidth}%`;
+                div.style.left = `${idx * whiteWidth}%`;
+                div.innerText = k.key;
+                kbContainer.appendChild(div);
+                keyPositions[k.index] = { left: idx * whiteWidth, width: whiteWidth };
+            });
+
+            blackKeys.forEach(k => {
+                const noteName = k.noteName;
+                const baseNote = noteName.replace('#', '');
+                const whiteIdx = whiteKeys.findIndex(wk => wk.noteName === baseNote);
+                if (whiteIdx !== -1) {
+                    const div = document.createElement('div');
+                    div.id = `key-${k.key}`;
+                    div.className = 'piano-key black-key';
+                    const blackWidth = whiteWidth * 0.7; 
+                    div.style.width = `${blackWidth}%`;
+                    const leftPos = (whiteIdx + 1) * whiteWidth - (blackWidth / 2);
+                    div.style.left = `${leftPos}%`;
+                    div.innerText = k.key;
+                    kbContainer.appendChild(div);
+                    keyPositions[k.index] = { left: leftPos, width: blackWidth };
+                }
+            });
+        }
+        renderKeyboard();
+
+        function resize() {
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = visContent.clientWidth * dpr;
+            canvas.height = canvas.clientHeight * dpr;
+            ctx.scale(dpr, dpr);
+            if (!isPlaying) draw(0);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        midiInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            statusDisplay.innerText = "PARSING MIDI...";
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                currentMidi = new Midi(e.target.result);
+                statusDisplay.innerText = "MIDI READY";
+                playBtn.disabled = false;
+                aiAnalyzeBtn.disabled = false;
+                autoTranspose(); 
+                processMidi();
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        function autoTranspose() {
+            if (!currentMidi) return;
+            let midis = [];
+            currentMidi.tracks.forEach(t => t.notes.forEach(n => midis.push(n.midi)));
+            if (midis.length === 0) return;
+            midis.sort((a,b) => a-b);
+            const minNote = midis[0];
+            const maxNote = midis[midis.length - 1];
+            const midPoint = (minNote + maxNote) / 2;
+            const targetMidPoint = 54; 
+            const diff = Math.round((targetMidPoint - midPoint) / 12) * 12;
+            transposeInput.value = diff;
+            document.getElementById('transValue').innerText = diff;
+        }
+
+        autoFixBtn.addEventListener('click', () => {
+            autoTranspose();
+            processMidi();
+        });
+
+        function getNoteName(midi) {
+            const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+            const noteIndex = ((midi % 12) + 12) % 12;
+            const octave = Math.floor(midi / 12) - 1;
+            if (octave < 1 || octave > 6) return null;
+            const name = notes[noteIndex] + octave;
+            return reverseMap.hasOwnProperty(name) ? name : null;
+        }
+
+        function processMidi() {
+            if (!currentMidi) return;
+            const transpose = parseInt(transposeInput.value);
+            processedNotes = [];
+            maxFileTime = 0;
+            currentMidi.tracks.forEach(track => {
+                track.notes.forEach(note => {
+                    const transposedMidi = note.midi + transpose;
+                    const name = getNoteName(transposedMidi);
+                    if (name && reverseMap[name]) {
+                        const noteEndTime = note.time + note.duration;
+                        if (noteEndTime > maxFileTime) maxFileTime = noteEndTime;
+                        
+                        processedNotes.push({
+                            time: note.time,
+                            duration: note.duration,
+                            midi: transposedMidi, 
+                            key: reverseMap[name].key,
+                            lane: reverseMap[name].index,
+                            isBlack: reverseMap[name].isBlack
+                        });
+                    }
+                });
+            });
+            processedNotes.sort((a, b) => a.time - b.time);
+            generateSheet();
+            if (!isPlaying) draw(0);
+        }
+
+        function generateSheet() {
+            if (processedNotes.length === 0) return;
+            const bpm = currentMidi.header.tempos[0]?.bpm || 120;
+            const measureTime = (60 / bpm) * 4;
+            const slotsPerMeasure = 32; 
+            const slotDuration = measureTime / slotsPerMeasure;
+            
+            const measures = [];
+            processedNotes.forEach(note => {
+                const totalSlots = Math.round(note.time / slotDuration);
+                const mIdx = Math.floor(totalSlots / slotsPerMeasure);
+                const sIdx = totalSlots % slotsPerMeasure;
+                if (!measures[mIdx]) measures[mIdx] = Array(slotsPerMeasure).fill(null);
+                if (!measures[mIdx][sIdx]) measures[mIdx][sIdx] = { keys: new Set(), time: totalSlots * slotDuration };
+                measures[mIdx][sIdx].keys.add(note.key);
+            });
+
+            resultArea.innerHTML = "";
+            sheetSpans = [];
+
+            let finalFragment = document.createDocumentFragment();
+            let currentLineDiv = document.createElement("div");
+            currentLineDiv.className = "mb-1";
+            finalFragment.appendChild(currentLineDiv);
+
+            const maxM = measures.length;
+            for (let m = 0; m < maxM; m++) {
+                const measure = measures[m] || Array(slotsPerMeasure).fill(null);
+                for (let s = 0; s < slotsPerMeasure; s++) {
+                    const slot = measure[s];
+                    const span = document.createElement("span");
+                    span.className = "px-[0.5px]";
+                    if (slot) {
+                        const keys = [...slot.keys].sort().join('');
+                        const text = (keys.length > 1 ? `[${keys}]` : keys);
+                        span.textContent = text;
+                        span.dataset.time = slot.time;
+                        sheetSpans.push(span);
+                    } else {
+                        span.textContent = " ";
+                    }
+                    currentLineDiv.appendChild(span);
+                }
+                
+                const divider = document.createElement("span");
+                divider.className = "text-slate-700 mx-2 select-none font-bold";
+                divider.textContent = "||";
+                currentLineDiv.appendChild(divider);
+                
+                if ((m + 1) % 2 === 0) {
+                    currentLineDiv = document.createElement("div");
+                    currentLineDiv.className = "mb-1 border-b border-white/5 pb-1";
+                    finalFragment.appendChild(currentLineDiv);
+                }
+            }
+            resultArea.appendChild(finalFragment);
+        }
+
+        aiAnalyzeBtn.addEventListener('click', async () => {
+            if (!currentMidi) return;
+            
+            document.getElementById('aiSection').classList.remove('hidden');
+            document.getElementById('aiLoading').classList.remove('hidden');
+            document.getElementById('aiMood').innerText = "Analyzing musical patterns...";
+            document.getElementById('aiTips').innerText = "";
+            aiAnalyzeBtn.disabled = true;
+
+            try {
+                const sheetText = resultArea.innerText.slice(0, 800);
+                const bpm = currentMidi.header.tempos[0]?.bpm || 120;
+                
+                const systemPrompt = "당신은 음악 분석 전문가입니다. 주어진 MIDI 기반 QWERTY 악보와 메타데이터를 분석하여 곡의 분위기, 장르, 연주 팁을 JSON 형식으로 제공하세요. 분위기에 어울리는 대표 색상(Hex)과 배경 이미지 생성을 위한 영어 프롬프트도 포함하세요. 응답은 한국어로 작성하세요.";
+                const userQuery = `BPM: ${bpm}, 악보 샘플: ${sheetText}`;
+                
+                const analyzeResult = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: userQuery }] }],
+                        systemInstruction: { parts: [{ text: systemPrompt }] },
+                        generationConfig: { 
+                            responseMimeType: "application/json",
+                            responseSchema: {
+                                type: "OBJECT",
+                                properties: {
+                                    mood: { type: "STRING" },
+                                    genre: { type: "STRING" },
+                                    tips: { type: "STRING" },
+                                    hexColor: { type: "STRING" },
+                                    imagePrompt: { type: "STRING" }
+                                }
+                            }
+                        }
+                    })
+                });
+
+                const data = JSON.parse(analyzeResult.candidates[0].content.parts[0].text);
+                aiAnalysisResult = data;
+
+                document.getElementById('aiMood').innerText = `🎶 ${data.genre} | ${data.mood}`;
+                document.getElementById('aiTips').innerText = data.tips;
+                
+                if (data.hexColor) {
+                    document.documentElement.style.setProperty('--active-color', data.hexColor);
+                    const darker = adjustColor(data.hexColor, -40);
+                    document.documentElement.style.setProperty('--active-color-dark', darker);
+                    visWrapper.style.borderColor = data.hexColor;
+                }
+
+                const imageResult = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        instances: [{ prompt: `Cinematic artistic music abstract visualization, ${data.imagePrompt}, vibrant colors, soft glow, high resolution` }],
+                        parameters: { sampleCount: 1 }
+                    })
+                });
+
+                if (imageResult.predictions && imageResult.predictions[0]) {
+                    const imageUrl = `data:image/png;base64,${imageResult.predictions[0].bytesBase64Encoded}`;
+                    bgImageContainer.style.backgroundImage = `url(${imageUrl})`;
+                    bgImageContainer.style.opacity = "0.2";
+                }
+
+                document.getElementById('aiLoading').classList.add('hidden');
+
+            } catch (error) {
+                console.error(error);
+                document.getElementById('aiMood').innerText = "Analysis failed. Please try again.";
+                document.getElementById('aiLoading').classList.add('hidden');
+            } finally {
+                aiAnalyzeBtn.disabled = false;
+            }
+        });
+
+        function adjustColor(hex, amt) {
+            let useHash = false;
+            if (hex[0] == "#") { hex = hex.slice(1); useHash = true; }
+            let num = parseInt(hex, 16);
+            let r = (num >> 16) + amt; if (r > 255) r = 255; else if (r < 0) r = 0;
+            let b = ((num >> 8) & 0x00FF) + amt; if (b > 255) b = 255; else if (b < 0) b = 0;
+            let g = (num & 0x0000FF) + amt; if (g > 255) g = 255; else if (g < 0) g = 0;
+            return (useHash ? "#" : "") + (g | (b << 8) | (r << 16)).toString(16).padStart(6, '0');
+        }
+
+        document.getElementById('ttsBtn').addEventListener('click', async () => {
+            if (!aiAnalysisResult) return;
+            try {
+                const ttsText = `분석 결과입니다. 이 곡은 ${aiAnalysisResult.mood}한 느낌의 ${aiAnalysisResult.genre} 곡입니다. 연주 팁은 다음과 같습니다. ${aiAnalysisResult.tips}`;
+                const ttsResult = await fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: `Say gently: ${ttsText}` }] }],
+                        generationConfig: { 
+                            responseModalities: ["AUDIO"],
+                            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } } }
+                        }
+                    })
+                });
+                const audioData = ttsResult.candidates[0].content.parts[0].inlineData.data;
+                const audioBlob = pcmToWav(audioData, 24000);
+                const audioUrl = URL.createObjectURL(audioBlob);
+                new Audio(audioUrl).play();
+            } catch (error) { console.error(error); }
+        });
+
+        function pcmToWav(base64Pcm, sampleRate) {
+            const buffer = Uint8Array.from(atob(base64Pcm), c => c.charCodeAt(0)).buffer;
+            const wavHeader = new ArrayBuffer(44);
+            const view = new DataView(wavHeader);
+            const len = buffer.byteLength;
+            view.setUint32(0, 0x52494646, false); view.setUint32(4, 36 + len, true);
+            view.setUint32(8, 0x57415645, false); view.setUint32(12, 0x666d7420, false);
+            view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true); view.setUint32(36, 0x64617461, false);
+            view.setUint32(40, len, true);
+            return new Blob([wavHeader, buffer], { type: 'audio/wav' });
+        }
+
+        playBtn.addEventListener('click', async () => {
+            if (isPlaying) {
+                isPlaying = false;
+                pausedTime = performance.now() - startTime;
+                playBtn.innerText = "재생";
+                statusDisplay.innerText = "PAUSED";
+                cancelAnimationFrame(animationId);
+                sheetFrame.classList.remove('active');
+            } else {
+                await Tone.start();
+                initAudio();
+                isPlaying = true;
+                startTime = performance.now() - pausedTime;
+                lastTriggerTime = (performance.now() - startTime) / 1000 * parseFloat(speedInput.value);
+                playBtn.innerText = "일시정지";
+                stopBtn.disabled = false;
+                statusDisplay.innerText = "PLAYING";
+                sheetFrame.classList.add('active');
+                animate();
+            }
+        });
+
+        function stopPlayback() {
+            isPlaying = false;
+            pausedTime = 0;
+            lastTriggerTime = 0;
+            playBtn.innerText = "재생";
+            stopBtn.disabled = true;
+            statusDisplay.innerText = "STOPPED";
+            cancelAnimationFrame(animationId);
+            draw(0);
+            timeDisplay.innerText = "00:00";
+            sheetFrame.classList.remove('active');
+            sheetSpans.forEach(s => s.classList.remove('note-active'));
+        }
+
+        stopBtn.addEventListener('click', stopPlayback);
+
+        function animate() {
+            if (!isPlaying) return;
+            const speed = parseFloat(speedInput.value);
+            const elapsed = (performance.now() - startTime) / 1000 * speed;
+            
+            if (elapsed > maxFileTime + 1.5) {
+                stopPlayback();
+                return;
+            }
+
+            processedNotes.forEach(note => {
+                if (note.time > lastTriggerTime && note.time <= elapsed) {
+                    if (isSamplesLoaded) {
+                        const noteName = Tone.Frequency(note.midi, "midi").toNote();
+                        sampler.triggerAttackRelease(noteName, note.duration / speed);
+                    }
+                }
+            });
+
+            // 악보 하이라이트 (자동 스크롤/포커싱 로직 제거됨)
+            sheetSpans.forEach(span => {
+                const noteTime = parseFloat(span.dataset.time);
+                if (elapsed >= noteTime && elapsed < noteTime + 0.15) {
+                    span.classList.add('note-active');
+                } else if (elapsed > noteTime + 0.15) {
+                    span.classList.remove('note-active');
+                }
+            });
+
+            lastTriggerTime = elapsed;
+            draw(elapsed);
+            const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            const secs = Math.floor(elapsed % 60).toString().padStart(2, '0');
+            timeDisplay.innerText = `${mins}:${secs}`;
+            animationId = requestAnimationFrame(animate);
+        }
+
+        function draw(currentTime) {
+            const dpr = window.devicePixelRatio || 1;
+            const w = canvas.width / dpr;
+            const h = canvas.height / dpr;
+            ctx.clearRect(0, 0, w, h);
+            const pps = parseFloat(zoomInput.value);
+            const hitY = h;
+
+            const activeCol = getComputedStyle(document.documentElement).getPropertyValue('--active-color').trim();
+
+            keyOrder.forEach((k, i) => {
+                const pos = keyPositions[i];
+                if (!pos) return;
+                const isBlack = keyMapData[k].includes('#');
+                const x = (pos.left / 100) * w;
+                const width = (pos.width / 100) * w;
+                if (isBlack) {
+                    ctx.fillStyle = 'rgba(255,255,255,0.02)';
+                    ctx.fillRect(x, 0, width, h);
+                }
+                ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(x, 0); ctx.lineTo(x, h);
+                ctx.stroke();
+            });
+
+            activeKeys.clear();
+            processedNotes.forEach(n => {
+                const rel = n.time - currentTime;
+                const noteY = hitY - (rel * pps);
+                const noteH = n.duration * pps;
+                const pos = keyPositions[n.lane];
+                if (!pos || noteY + noteH < 0 || noteY > h + 400) return;
+
+                const isActive = rel <= 0 && rel + n.duration >= 0;
+                if (isActive) activeKeys.add(n.key);
+
+                const x = (pos.left / 100) * w;
+                const width = (pos.width / 100) * w;
+                
+                if (isActive) {
+                    ctx.fillStyle = activeCol;
+                    ctx.shadowBlur = 25;
+                    ctx.shadowColor = activeCol;
+                } else {
+                    ctx.fillStyle = n.isBlack ? '#4f46e5' : '#334155';
+                    ctx.shadowBlur = 0;
+                }
+
+                const actualH = Math.max(noteH, 12);
+                drawRoundedRect(ctx, x + 1, noteY - actualH, width - 2, actualH, 4);
+                ctx.fill();
+
+                if (rel < 3) {
+                    ctx.fillStyle = isActive ? '#fff' : (n.isBlack ? '#fff' : '#94a3b8');
+                    ctx.font = `bold ${Math.min(10, width * 0.9)}px JetBrains Mono`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    ctx.fillText(n.key, x + (width / 2), noteY - 4);
+                }
+            });
+
+            keyOrder.forEach(k => {
+                const el = document.getElementById(`key-${k}`);
+                if (el) {
+                    if (activeKeys.has(k)) el.classList.add('key-active');
+                    else el.classList.remove('key-active');
+                }
+            });
+        }
+
+        function drawRoundedRect(ctx, x, y, width, height, radius) {
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + width - radius, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+            ctx.lineTo(x + width, y + height - radius);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            ctx.lineTo(x + radius, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+        }
+
+        transposeInput.addEventListener('input', (e) => {
+            document.getElementById('transValue').innerText = e.target.value;
+            processMidi();
+        });
+        speedInput.addEventListener('input', (e) => {
+            document.getElementById('speedValue').innerText = e.target.value;
+        });
+        zoomInput.addEventListener('input', (e) => {
+            document.getElementById('zoomValue').innerText = e.target.value;
+            if (!isPlaying) draw(0);
+        });
+        
+        document.getElementById('copyBtn').addEventListener('click', () => {
+            const text = resultArea.innerText;
+            const temp = document.createElement("textarea");
+            document.body.appendChild(temp);
+            temp.value = text;
+            temp.select();
+            document.execCommand('copy');
+            document.body.removeChild(temp);
+            const b = document.getElementById('copyBtn');
+            b.innerText = "COPIED!";
+            setTimeout(() => b.innerText = "COPY TEXT", 2000);
+        });
+    </script>
+</body>
+</html>

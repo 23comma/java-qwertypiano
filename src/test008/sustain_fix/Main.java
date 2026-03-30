@@ -1,6 +1,5 @@
 package test008.sustain_fix;
 
-
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Font;
@@ -29,10 +28,29 @@ public class Main extends JFrame {
 	private boolean isSustainToggled = false; // 시작 시 false (OFF)
 	private int octaveOffset = 0;
 	private int transposeOffset = 0;
-
+	private boolean isSpacePressed = false;
 	// 자동 페달 관련 변수 (서스테인 유지 및 주기적 리셋)
 	private Thread autoPedalThread = null;
-	private int pedalInterval = 1000; // 페달 유지 간격 (ms)
+	private int pedalInterval = 100; // 페달 유지 간격 (ms)
+	private int releaseTime = 100; // 
+	private int reverbLevel = 50; // 기본값
+	private int chorusLevel = 50;
+	private void applySustainState() {
+	    boolean sustainOn = isSustainToggled || isSpacePressed;
+	    sendSustainCommand(sustainOn);
+	}
+	
+	private void setReverb(int value) {
+		try {
+			if (receiver != null) {
+				ShortMessage msg = new ShortMessage();
+				msg.setMessage(ShortMessage.CONTROL_CHANGE, 0, 91, value);
+				receiver.send(msg, -1);
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
 
 	private void sendSustainCommand(boolean isOn) {
 		try {
@@ -50,33 +68,31 @@ public class Main extends JFrame {
 
 	// 서스테인이 켜져있을 때 효과를 유지하거나 주기적으로 갱신하는 로직
 	private void manageAutoPedal(boolean start) {
-		if (start) {
-			// 이미 실행 중이면 중복 실행 방지
-			if (autoPedalThread != null && autoPedalThread.isAlive())
-				return;
+	    if (start) {
+	        if (autoPedalThread != null && autoPedalThread.isAlive())
+	            return;
 
-			isSustainToggled = true;
-			sendSustainCommand(true); // 페달 밟음
+	        isSustainToggled = true;
+	        applySustainState();
 
-			autoPedalThread = new Thread(() -> {
-				try {
-					while (isSustainToggled) {
-						Thread.sleep(pedalInterval);
-					}
-				} catch (InterruptedException e) {
-					// 스레드 종료 시 catch됨
-				}
-			});
-			autoPedalThread.setDaemon(true);
-			autoPedalThread.start();
-		} else {
-			isSustainToggled = false;
-			if (autoPedalThread != null) {
-				autoPedalThread.interrupt();
-				autoPedalThread = null;
-			}
-			sendSustainCommand(false); // 페달 떼기 (Sustain OFF)
-		}
+	        autoPedalThread = new Thread(() -> {
+	            try {
+	                while (isSustainToggled) {
+	                    Thread.sleep(pedalInterval);
+	                }
+	            } catch (InterruptedException e) {
+	            }
+	        });
+	        autoPedalThread.setDaemon(true);
+	        autoPedalThread.start();
+	    } else {
+	        isSustainToggled = false;
+	        if (autoPedalThread != null) {
+	            autoPedalThread.interrupt();
+	            autoPedalThread = null;
+	        }
+	        applySustainState();
+	    }
 	}
 
 	private void initMidiPort() {
@@ -114,15 +130,22 @@ public class Main extends JFrame {
 	}
 
 	private void noteOFF(int noteNumber) {
-		try {
-			if (receiver != null) {
-				ShortMessage myMsg = new ShortMessage();
-				myMsg.setMessage(ShortMessage.NOTE_OFF, 0, noteNumber, 93);
-				receiver.send(myMsg, -1);
+		new Thread(() -> {
+			try {
+				Thread.sleep(releaseTime); // 🔥 릴리즈 시간
+			} catch (InterruptedException e) {
 			}
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
+
+			try {
+				if (receiver != null) {
+					ShortMessage myMsg = new ShortMessage();
+					myMsg.setMessage(ShortMessage.NOTE_OFF, 0, noteNumber, 93);
+					receiver.send(myMsg, -1);
+				}
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}).start();
 	}
 
 	private void setKeyMap() {
@@ -137,6 +160,18 @@ public class Main extends JFrame {
 		}
 	}
 
+	private void setChorus(int value) {
+		try {
+			if (receiver != null) {
+				ShortMessage msg = new ShortMessage();
+				msg.setMessage(ShortMessage.CONTROL_CHANGE, 0, 93, value);
+				receiver.send(msg, -1);
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
 	private void setTextArea() {
 		textArea = new JTextArea();
 		textArea.setLineWrap(true);
@@ -145,35 +180,91 @@ public class Main extends JFrame {
 			@Override
 			public void keyPressed(KeyEvent e) {
 				int keyCode = e.getKeyCode();
+				// 🔥 Reverb ([ / ])
+				if (keyCode == KeyEvent.VK_SPACE) {
+				    if (!isSpacePressed) {
+				        isSpacePressed = true;
+				        applySustainState();
+				        updateStatus();
+				    }
+				    e.consume();
+				    return;
+				}
+				if (keyCode == KeyEvent.VK_OPEN_BRACKET) { // [
+					reverbLevel = Math.max(0, reverbLevel - 1);
+					setReverb(reverbLevel);
+					updateStatus();
+					return;
+				}
 
-				// Shift + Backspace: 서스테인 토글 로직
+				if (keyCode == KeyEvent.VK_CLOSE_BRACKET) { // ]
+					reverbLevel = Math.min(127, reverbLevel + 1);
+					setReverb(reverbLevel);
+					updateStatus();
+					return;
+				}
+
+				// 🔥 Chorus (; / ')
+				if (keyCode == KeyEvent.VK_SEMICOLON) { // ;
+					chorusLevel = Math.max(0, chorusLevel - 1);
+					setChorus(chorusLevel);
+					updateStatus();
+					return;
+				}
+
+				if (keyCode == KeyEvent.VK_QUOTE) { // '
+					chorusLevel = Math.min(127, chorusLevel + 1);
+					setChorus(chorusLevel);
+					updateStatus();
+					return;
+				}
+				// Shift + Backspace → Sustain 토글
 				if (keyCode == KeyEvent.VK_BACK_SPACE && e.isShiftDown()) {
 					manageAutoPedal(!isSustainToggled);
 					updateStatus();
 					e.consume();
 					return;
 				}
-
-				// 방향키 제어
-				switch (keyCode) {
-				case KeyEvent.VK_UP:
-					octaveOffset += 12;
-					updateStatus();
-					return;
-				case KeyEvent.VK_DOWN:
-					octaveOffset -= 12;
-					updateStatus();
-					return;
-				case KeyEvent.VK_RIGHT:
-					transposeOffset += 1;
-					updateStatus();
-					return;
-				case KeyEvent.VK_LEFT:
-					transposeOffset -= 1;
+				// 🔥 Release 조절 (Shift + , / Shift + -)
+				if (keyCode == KeyEvent.VK_MINUS) {
+					releaseTime = Math.max(0, releaseTime - 10);
 					updateStatus();
 					return;
 				}
 
+				if (keyCode == KeyEvent.VK_EQUALS) {
+					releaseTime = Math.min(1000, releaseTime + 10);
+					updateStatus();
+					return;
+				}
+				// Shift 조합 컨트롤
+				if (e.isShiftDown()) {
+
+					switch (keyCode) {
+					case KeyEvent.VK_UP:
+						octaveOffset += 12;
+						updateStatus();
+						return;
+
+					case KeyEvent.VK_DOWN:
+						octaveOffset -= 12;
+						updateStatus();
+						return;
+
+					case KeyEvent.VK_RIGHT:
+						transposeOffset += 1;
+						updateStatus();
+						return;
+
+					case KeyEvent.VK_LEFT:
+						transposeOffset -= 1;
+						updateStatus();
+						return;
+					}
+
+				}
+
+				// 일반 노트 입력
 				String charKey = String.valueOf(e.getKeyChar());
 				Integer baseNote = keyMap.get(charKey);
 
@@ -190,7 +281,7 @@ public class Main extends JFrame {
 			public void keyReleased(KeyEvent e) {
 				if (e.getKeyCode() == KeyEvent.VK_BACK_SPACE)
 					return;
-					
+
 				String charKey = String.valueOf(e.getKeyChar());
 				Integer baseNote = keyMap.get(charKey);
 
@@ -204,9 +295,16 @@ public class Main extends JFrame {
 	}
 
 	private void updateStatus() {
-		String status = String.format("Octave: %+d | Transpose: %+d | Sustain: %s", octaveOffset / 12,
-				transposeOffset, isSustainToggled ? "ON (Hold)" : "OFF");
-		setTitle("MIDI Controller - " + status);
+	    String status = String.format(
+	        "Octave: %+d | Transpose: %+d | Reverb: %d | Chorus: %d | Sustain: %s | Release: %dms",
+	        octaveOffset / 12,
+	        transposeOffset,
+	        reverbLevel,
+	        chorusLevel,
+	        isSustainToggled ? "ON" : "OFF",
+	        releaseTime
+	    );
+	    setTitle("MIDI Controller - " + status);
 	}
 
 	private void setFrame() {
@@ -227,7 +325,7 @@ public class Main extends JFrame {
 		setTextArea();
 		setFrame();
 		// 생성자에서 manageAutoPedal(false)를 명시적으로 호출하여 OFF 상태로 시작
-		manageAutoPedal(false); 
+		manageAutoPedal(false);
 		updateStatus();
 	}
 
